@@ -2,7 +2,7 @@ import os
 import sys
 import pandas as pd
 import numpy as np
-
+import time
 # Mapping decisions (based on provided header)
 # - sbytes <- totlen_fwd_pkts (total forward bytes)
 # - dbytes <- totlen_bwd_pkts (total backward bytes)
@@ -16,6 +16,10 @@ import numpy as np
 # - dinpkt <- bwd_pkts_s
 # - flow_byts_s provided -> split between sload/dload proportionally by spkts/dpkts if possible
 # - service/state default to '-'
+input_dir="/tmp/parquets"
+output_dir="/tmp/final_parquets"
+os.makedirs(output_dir,exist_ok=True)
+
 
 def convert(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(index=df.index)
@@ -73,22 +77,39 @@ def convert(df: pd.DataFrame) -> pd.DataFrame:
     return out[cols]
 
 def main():
-    if len(sys.argv) != 3:
-        print("Usage: python convert_cicflow_to_unsw_specific.py <input_parquet> <output_parquet>")
-        sys.exit(1)
-    inp, outp = sys.argv[1], sys.argv[2]
-    if not os.path.exists(inp):
-        print("Input not found", inp); sys.exit(1)
-    df = pd.read_parquet(inp)
-    print("Loaded", len(df), "rows; columns:", list(df.columns))
-    converted = convert(df)
-    # show missing essentials
-    essentials = ['sbytes','dbytes','spkts','dpkts','dur','proto']
-    missing = [c for c in essentials if c not in converted.columns or converted[c].isna().all()]
-    if missing:
-        print("WARNING - missing or all-NaN essential features:", missing)
-    converted.to_parquet(outp, index=False)
-    print("Wrote converted file:", outp)
 
+    print(f"Monitoring {input_dir} for parquet files...")
+    while True:
+        for filename in os.listdir(input_dir):
+            if not filename.endswith(".parquet"):
+                continue
+
+            parquet_path = os.path.join(input_dir, filename)
+            output_path = os.path.join(output_dir, filename)
+
+            try:
+                print(f"Processing {filename} ...")
+                df = pd.read_parquet(parquet_path)
+
+                converted = convert(df)
+
+                essentials = ['sbytes','dbytes','spkts','dpkts','dur','proto']
+                missing = [c for c in essentials if converted[c].isna().all()]
+                if missing:
+                    print("WARNING: missing essential columns:", missing)
+
+                converted.to_parquet(output_path, index=False)
+                print(f"Saved → {output_path}")
+
+                # DELETE the processed input
+                os.remove(parquet_path)
+                print(f"Deleted input file {parquet_path}")
+
+            except Exception as e:
+                print(f"Error processing {filename}: {e}")
+
+        # small sleep to avoid busy looping
+        time.sleep(0.5)
 if __name__ == '__main__':
+    
     main()
